@@ -1,12 +1,14 @@
 class VulcanGradesCard extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("vulcan-grades-card-editor");
+  }
+
   static getStubConfig(hass) {
     const entity = Object.keys(hass?.states || {}).find((entityId) => {
       const stateObj = hass.states[entityId];
-
       return (
         entityId.startsWith("sensor.") &&
-        Array.isArray(stateObj?.attributes?.grades) &&
-        stateObj?.attributes?.student_id
+        Array.isArray(stateObj?.attributes?.grades)
       );
     });
 
@@ -23,102 +25,9 @@ class VulcanGradesCard extends HTMLElement {
     };
   }
 
-  static getConfigForm() {
-    return {
-      schema: [
-        {
-          name: "entity",
-          required: true,
-          selector: {
-            entity: {
-              domain: "sensor",
-            },
-          },
-        },
-        {
-          name: "title",
-          selector: {
-            text: {},
-          },
-        },
-        {
-          name: "max_items",
-          selector: {
-            number: {
-              min: 1,
-              max: 30,
-              mode: "box",
-            },
-          },
-        },
-        {
-          name: "subject",
-          selector: {
-            text: {},
-          },
-        },
-        {
-          name: "show_header",
-          selector: {
-            boolean: {},
-          },
-        },
-        {
-          name: "show_category",
-          selector: {
-            boolean: {},
-          },
-        },
-        {
-          name: "show_weight",
-          selector: {
-            boolean: {},
-          },
-        },
-        {
-          name: "show_teacher",
-          selector: {
-            boolean: {},
-          },
-        },
-        {
-          name: "show_updated",
-          selector: {
-            boolean: {},
-          },
-        },
-        {
-          name: "compact",
-          selector: {
-            boolean: {},
-          },
-        },
-      ],
-      computeLabel: (schema) => {
-        const labels = {
-          entity: "Encja ocen Vulcan",
-          title: "Tytuł",
-          max_items: "Liczba ocen",
-          subject: "Filtr przedmiotu",
-          show_header: "Pokazuj nagłówek",
-          show_category: "Pokazuj kategorię",
-          show_weight: "Pokazuj wagę",
-          show_teacher: "Pokazuj nauczyciela",
-          show_updated: "Pokazuj czas aktualizacji",
-          compact: "Tryb kompaktowy",
-        };
-
-        return labels[schema.name] || schema.name;
-      },
-    };
-  }
-
   setConfig(config) {
-    if (!config.entity) {
-      throw new Error("Wymagana jest opcja: entity");
-    }
-
     this.config = {
+      entity: "",
       title: "Oceny",
       max_items: 10,
       show_header: true,
@@ -133,6 +42,8 @@ class VulcanGradesCard extends HTMLElement {
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
     }
+
+    this.render();
   }
 
   set hass(hass) {
@@ -143,6 +54,15 @@ class VulcanGradesCard extends HTMLElement {
   getCardSize() {
     const count = Number(this.config?.max_items || 10);
     return Math.max(3, Math.ceil(count / 2));
+  }
+
+  getGridOptions() {
+    return {
+      columns: 12,
+      rows: "auto",
+      min_columns: 6,
+      min_rows: 3,
+    };
   }
 
   escapeHtml(value) {
@@ -174,7 +94,12 @@ class VulcanGradesCard extends HTMLElement {
   }
 
   gradeStyle(grade) {
-    const value = Number(grade?.value);
+    const rawValue = grade?.value;
+    const value =
+      rawValue === null || rawValue === undefined || rawValue === ""
+        ? Number.NaN
+        : Number(rawValue);
+
     const content = String(grade?.content ?? "").trim();
 
     if (!Number.isNaN(value)) {
@@ -225,16 +150,30 @@ class VulcanGradesCard extends HTMLElement {
   }
 
   render() {
-    if (!this._hass || !this.config || !this.shadowRoot) return;
+    if (!this.shadowRoot || !this.config) return;
 
-    const stateObj = this._hass.states[this.config.entity];
+    const entityId = this.config.entity;
+    const stateObj = this._hass?.states?.[entityId];
+
+    if (!entityId) {
+      this.shadowRoot.innerHTML = `
+        ${this.cardStyles()}
+        <ha-card>
+          <div class="error">
+            Wybierz encję ocen Vulcan w konfiguracji karty.
+          </div>
+        </ha-card>
+      `;
+      return;
+    }
 
     if (!stateObj) {
       this.shadowRoot.innerHTML = `
+        ${this.cardStyles()}
         <ha-card>
           <div class="error">
             Nie znaleziono encji:
-            <strong>${this.escapeHtml(this.config.entity)}</strong>
+            <strong>${this.escapeHtml(entityId)}</strong>
           </div>
         </ha-card>
       `;
@@ -260,6 +199,7 @@ class VulcanGradesCard extends HTMLElement {
       return dateB - dateA;
     });
 
+    const allMatchingCount = grades.length;
     const maxItems = Math.max(1, Number(this.config.max_items || 10));
     grades = grades.slice(0, maxItems);
 
@@ -354,6 +294,56 @@ class VulcanGradesCard extends HTMLElement {
     `;
 
     this.shadowRoot.innerHTML = `
+      ${this.cardStyles()}
+
+      <ha-card class="${compactClass}">
+        <div class="content">
+          ${
+            this.config.show_header
+              ? `
+                <div class="header">
+                  <div>
+                    <div class="title">
+                      ⭐ ${this.escapeHtml(title)}
+                    </div>
+                    ${
+                      subtitleParts.length
+                        ? `<div class="subtitle">${this.escapeHtml(
+                            subtitleParts.join(" · ")
+                          )}</div>`
+                        : ""
+                    }
+                  </div>
+
+                  <div class="counter">
+                    ${grades.length} z ${allMatchingCount}
+                  </div>
+                </div>
+              `
+              : ""
+          }
+
+          <div class="grades">
+            ${grades.length ? rows : emptyState}
+          </div>
+
+          ${
+            this.config.show_updated && attrs.updated_at
+              ? `
+                <div class="updated">
+                  Aktualizacja:
+                  ${this.escapeHtml(this.formatDate(attrs.updated_at, true))}
+                </div>
+              `
+              : ""
+          }
+        </div>
+      </ha-card>
+    `;
+  }
+
+  cardStyles() {
+    return `
       <style>
         :host {
           display: block;
@@ -491,7 +481,7 @@ class VulcanGradesCard extends HTMLElement {
 
         .updated {
           margin-top: 10px;
-          color: #475569;
+          color: #64748b;
           font-size: 9px;
           text-align: right;
         }
@@ -533,52 +523,369 @@ class VulcanGradesCard extends HTMLElement {
           font-size: 11px;
         }
       </style>
-
-      <ha-card class="${compactClass}">
-        <div class="content">
-          ${
-            this.config.show_header
-              ? `
-                <div class="header">
-                  <div>
-                    <div class="title">
-                      ⭐ ${this.escapeHtml(title)}
-                    </div>
-                    ${
-                      subtitleParts.length
-                        ? `<div class="subtitle">${this.escapeHtml(
-                            subtitleParts.join(" · ")
-                          )}</div>`
-                        : ""
-                    }
-                  </div>
-
-                  <div class="counter">
-                    ${grades.length} z ${Array.isArray(attrs.grades) ? attrs.grades.length : 0}
-                  </div>
-                </div>
-              `
-              : ""
-          }
-
-          <div class="grades">
-            ${grades.length ? rows : emptyState}
-          </div>
-
-          ${
-            this.config.show_updated && attrs.updated_at
-              ? `
-                <div class="updated">
-                  Aktualizacja:
-                  ${this.escapeHtml(this.formatDate(attrs.updated_at, true))}
-                </div>
-              `
-              : ""
-          }
-        </div>
-      </ha-card>
     `;
   }
+}
+
+
+class VulcanGradesCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = {
+      entity: "",
+      title: "Oceny",
+      max_items: 10,
+      show_header: true,
+      show_category: true,
+      show_weight: true,
+      show_teacher: false,
+      show_updated: true,
+      compact: false,
+      ...config,
+    };
+
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+    }
+
+    this.render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this.render();
+  }
+
+  escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  getGradeEntities() {
+    if (!this._hass?.states) return [];
+
+    return Object.entries(this._hass.states)
+      .filter(([entityId, stateObj]) => {
+        return (
+          entityId.startsWith("sensor.") &&
+          Array.isArray(stateObj?.attributes?.grades)
+        );
+      })
+      .sort((a, b) => {
+        const nameA =
+          a[1].attributes?.friendly_name || a[0];
+        const nameB =
+          b[1].attributes?.friendly_name || b[0];
+
+        return String(nameA).localeCompare(String(nameB), "pl");
+      });
+  }
+
+  fireConfigChanged(config) {
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  updateConfig(key, value) {
+    const newConfig = {
+      ...this._config,
+      [key]: value,
+    };
+
+    if (key === "subject" && !value) {
+      delete newConfig.subject;
+    }
+
+    this._config = newConfig;
+    this.fireConfigChanged(newConfig);
+    this.render();
+  }
+
+  render() {
+    if (!this.shadowRoot || !this._config) return;
+
+    const entities = this.getGradeEntities();
+
+    const entityOptions = [
+      `<option value="">— wybierz encję ocen —</option>`,
+      ...entities.map(([entityId, stateObj]) => {
+        const name =
+          stateObj.attributes?.friendly_name || entityId;
+        const selected =
+          this._config.entity === entityId ? "selected" : "";
+
+        return `
+          <option
+            value="${this.escapeHtml(entityId)}"
+            ${selected}
+          >
+            ${this.escapeHtml(name)} — ${this.escapeHtml(entityId)}
+          </option>
+        `;
+      }),
+    ].join("");
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host {
+          display: block;
+          box-sizing: border-box;
+          color: var(--primary-text-color);
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        .editor {
+          display: grid;
+          gap: 16px;
+          padding: 4px 0;
+        }
+
+        .field {
+          display: grid;
+          gap: 7px;
+        }
+
+        label {
+          color: var(--primary-text-color);
+          font-size: 14px;
+          font-weight: 600;
+        }
+
+        .hint {
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          line-height: 1.35;
+        }
+
+        select,
+        input[type="text"],
+        input[type="number"] {
+          width: 100%;
+          min-height: 46px;
+          padding: 10px 12px;
+          border: 1px solid var(--divider-color);
+          border-radius: 10px;
+          outline: none;
+          color: var(--primary-text-color);
+          background: var(--card-background-color);
+          font: inherit;
+        }
+
+        select:focus,
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+          border-color: var(--primary-color);
+          box-shadow: 0 0 0 1px var(--primary-color);
+        }
+
+        .switches {
+          display: grid;
+          gap: 4px;
+          padding-top: 2px;
+        }
+
+        .switch-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 16px;
+          min-height: 42px;
+          padding: 5px 0;
+          border-bottom: 1px solid var(--divider-color);
+        }
+
+        .switch-row:last-child {
+          border-bottom: 0;
+        }
+
+        .switch-label {
+          color: var(--primary-text-color);
+          font-size: 14px;
+        }
+
+        input[type="checkbox"] {
+          width: 20px;
+          height: 20px;
+          accent-color: var(--primary-color);
+          cursor: pointer;
+        }
+
+        .warning {
+          padding: 12px;
+          border-radius: 10px;
+          color: var(--warning-color, #ff9800);
+          background: color-mix(
+            in srgb,
+            var(--warning-color, #ff9800) 12%,
+            transparent
+          );
+          font-size: 13px;
+          line-height: 1.4;
+        }
+      </style>
+
+      <div class="editor">
+        ${
+          entities.length === 0
+            ? `
+              <div class="warning">
+                Nie znaleziono żadnej encji sensora z atrybutem
+                <strong>grades</strong>. Sprawdź, czy integracja Vulcan
+                utworzyła encję ocen.
+              </div>
+            `
+            : ""
+        }
+
+        <div class="field">
+          <label for="entity">Encja ocen</label>
+          <select id="entity">
+            ${entityOptions}
+          </select>
+          <div class="hint">
+            Lista pokazuje wyłącznie sensory zawierające atrybut grades.
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="title">Tytuł karty</label>
+          <input
+            id="title"
+            type="text"
+            value="${this.escapeHtml(this._config.title ?? "")}"
+            placeholder="Oceny"
+          />
+        </div>
+
+        <div class="field">
+          <label for="max_items">Liczba wyświetlanych ocen</label>
+          <input
+            id="max_items"
+            type="number"
+            min="1"
+            max="50"
+            step="1"
+            value="${this.escapeHtml(this._config.max_items ?? 10)}"
+          />
+        </div>
+
+        <div class="field">
+          <label for="subject">Filtr przedmiotu</label>
+          <input
+            id="subject"
+            type="text"
+            value="${this.escapeHtml(this._config.subject ?? "")}"
+            placeholder="np. Matematyka — pozostaw puste dla wszystkich"
+          />
+        </div>
+
+        <div class="switches">
+          ${this.switchRow(
+            "show_header",
+            "Pokazuj nagłówek",
+            this._config.show_header
+          )}
+          ${this.switchRow(
+            "show_category",
+            "Pokazuj kategorię",
+            this._config.show_category
+          )}
+          ${this.switchRow(
+            "show_weight",
+            "Pokazuj wagę",
+            this._config.show_weight
+          )}
+          ${this.switchRow(
+            "show_teacher",
+            "Pokazuj nauczyciela",
+            this._config.show_teacher
+          )}
+          ${this.switchRow(
+            "show_updated",
+            "Pokazuj czas aktualizacji",
+            this._config.show_updated
+          )}
+          ${this.switchRow(
+            "compact",
+            "Tryb kompaktowy",
+            this._config.compact
+          )}
+        </div>
+      </div>
+    `;
+
+    this.bindEvents();
+  }
+
+  switchRow(id, label, checked) {
+    return `
+      <label class="switch-row" for="${id}">
+        <span class="switch-label">${this.escapeHtml(label)}</span>
+        <input
+          id="${id}"
+          type="checkbox"
+          ${checked ? "checked" : ""}
+        />
+      </label>
+    `;
+  }
+
+  bindEvents() {
+    const root = this.shadowRoot;
+    if (!root) return;
+
+    root.getElementById("entity")?.addEventListener("change", (event) => {
+      this.updateConfig("entity", event.target.value);
+    });
+
+    root.getElementById("title")?.addEventListener("change", (event) => {
+      this.updateConfig("title", event.target.value);
+    });
+
+    root.getElementById("max_items")?.addEventListener("change", (event) => {
+      const value = Math.min(
+        50,
+        Math.max(1, Number.parseInt(event.target.value, 10) || 10)
+      );
+      this.updateConfig("max_items", value);
+    });
+
+    root.getElementById("subject")?.addEventListener("change", (event) => {
+      this.updateConfig("subject", event.target.value.trim());
+    });
+
+    [
+      "show_header",
+      "show_category",
+      "show_weight",
+      "show_teacher",
+      "show_updated",
+      "compact",
+    ].forEach((key) => {
+      root.getElementById(key)?.addEventListener("change", (event) => {
+        this.updateConfig(key, event.target.checked);
+      });
+    });
+  }
+}
+
+
+if (!customElements.get("vulcan-grades-card-editor")) {
+  customElements.define(
+    "vulcan-grades-card-editor",
+    VulcanGradesCardEditor
+  );
 }
 
 if (!customElements.get("vulcan-grades-card")) {
@@ -586,15 +893,25 @@ if (!customElements.get("vulcan-grades-card")) {
 }
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "vulcan-grades-card",
-  name: "Vulcan UONET+ — Oceny",
-  description: "Karta ocen ucznia z integracji Vulcan UONET+",
-  preview: true,
-});
+
+if (
+  !window.customCards.some(
+    (card) => card.type === "vulcan-grades-card"
+  )
+) {
+  window.customCards.push({
+    type: "vulcan-grades-card",
+    name: "Vulcan UONET+ — Oceny",
+    description:
+      "Karta ocen ucznia z integracji Vulcan UONET+",
+    preview: true,
+    documentationURL:
+      "https://github.com/lukkic1205/towerbridge",
+  });
+}
 
 console.info(
-  "%c VULCAN-GRADES-CARD %c załadowana",
+  "%c VULCAN-GRADES-CARD %c v1.0.4 załadowana",
   "color:#08111f;background:#8be9fd;font-weight:700;padding:3px 6px;border-radius:4px 0 0 4px;",
   "color:#8be9fd;background:#08111f;padding:3px 6px;border-radius:0 4px 4px 0;"
 );
