@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 
@@ -47,18 +46,22 @@ async def async_setup_entry(
     account_data = entry.data["account"]
     keystore_data = entry.data["keystore"]
 
-    account = Account.load(
-        json.dumps(
-            account_data,
-            ensure_ascii=False,
-        )
+    _LOGGER.warning(
+        "Vulcan UONET+: zapisane klucze konta: %s",
+        list(account_data.keys()),
     )
 
-    keystore = Keystore.load(
-        json.dumps(
-            keystore_data,
-            ensure_ascii=False,
-        )
+    _LOGGER.warning(
+        "Vulcan UONET+: zapisany RestURL: %s",
+        account_data.get("RestURL"),
+    )
+
+    account = Account.load(account_data)
+    keystore = Keystore.load(keystore_data)
+
+    _LOGGER.warning(
+        "Vulcan UONET+: odtworzony account.rest_url: %s",
+        account.rest_url,
     )
 
     session = async_get_clientsession(hass)
