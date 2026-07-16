@@ -1,4 +1,118 @@
 class VulcanGradesCard extends HTMLElement {
+  static getStubConfig(hass) {
+    const entity = Object.keys(hass?.states || {}).find((entityId) => {
+      const stateObj = hass.states[entityId];
+
+      return (
+        entityId.startsWith("sensor.") &&
+        Array.isArray(stateObj?.attributes?.grades) &&
+        stateObj?.attributes?.student_id
+      );
+    });
+
+    return {
+      entity: entity || "",
+      title: "Oceny",
+      max_items: 10,
+      show_header: true,
+      show_category: true,
+      show_weight: true,
+      show_teacher: false,
+      show_updated: true,
+      compact: false,
+    };
+  }
+
+  static getConfigForm() {
+    return {
+      schema: [
+        {
+          name: "entity",
+          required: true,
+          selector: {
+            entity: {
+              domain: "sensor",
+            },
+          },
+        },
+        {
+          name: "title",
+          selector: {
+            text: {},
+          },
+        },
+        {
+          name: "max_items",
+          selector: {
+            number: {
+              min: 1,
+              max: 30,
+              mode: "box",
+            },
+          },
+        },
+        {
+          name: "subject",
+          selector: {
+            text: {},
+          },
+        },
+        {
+          name: "show_header",
+          selector: {
+            boolean: {},
+          },
+        },
+        {
+          name: "show_category",
+          selector: {
+            boolean: {},
+          },
+        },
+        {
+          name: "show_weight",
+          selector: {
+            boolean: {},
+          },
+        },
+        {
+          name: "show_teacher",
+          selector: {
+            boolean: {},
+          },
+        },
+        {
+          name: "show_updated",
+          selector: {
+            boolean: {},
+          },
+        },
+        {
+          name: "compact",
+          selector: {
+            boolean: {},
+          },
+        },
+      ],
+      computeLabel: (schema) => {
+        const labels = {
+          entity: "Encja ocen Vulcan",
+          title: "Tytuł",
+          max_items: "Liczba ocen",
+          subject: "Filtr przedmiotu",
+          show_header: "Pokazuj nagłówek",
+          show_category: "Pokazuj kategorię",
+          show_weight: "Pokazuj wagę",
+          show_teacher: "Pokazuj nauczyciela",
+          show_updated: "Pokazuj czas aktualizacji",
+          compact: "Tryb kompaktowy",
+        };
+
+        return labels[schema.name] || schema.name;
+      },
+    };
+  }
+
   setConfig(config) {
     if (!config.entity) {
       throw new Error("Wymagana jest opcja: entity");
@@ -474,8 +588,8 @@ if (!customElements.get("vulcan-grades-card")) {
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "vulcan-grades-card",
-  name: "Vulcan Grades Card",
-  description: "Karta ocen dla integracji Vulcan UONET+",
+  name: "Vulcan UONET+ — Oceny",
+  description: "Karta ocen ucznia z integracji Vulcan UONET+",
   preview: true,
 });
 
