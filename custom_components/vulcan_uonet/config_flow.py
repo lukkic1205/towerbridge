@@ -75,6 +75,11 @@ class VulcanUonetConfigFlow(
             if not errors:
                 try:
                     _LOGGER.warning(
+                        "Vulcan UONET+: rozpoczynam konfigurację dla symbolu %s",
+                        symbol,
+                    )
+
+                    _LOGGER.warning(
                         "Vulcan UONET+: aktywuję signer "
                         "uonet_request_signer_hebe"
                     )
@@ -92,9 +97,13 @@ class VulcanUonetConfigFlow(
                     )
 
                     _LOGGER.warning(
-                        "Vulcan UONET+: rejestruję urządzenie "
-                        "dla symbolu %s",
-                        symbol,
+                        "Vulcan UONET+: keystore utworzony, "
+                        "fingerprint=%s",
+                        keystore.fingerprint,
+                    )
+
+                    _LOGGER.warning(
+                        "Vulcan UONET+: rozpoczynam rejestrację urządzenia"
                     )
 
                     account = await Account.register(
@@ -106,13 +115,10 @@ class VulcanUonetConfigFlow(
 
                     _LOGGER.warning(
                         "Vulcan UONET+: rejestracja zakończona; "
-                        "RestURL=%s, fingerprint=%s",
+                        "RestURL=%s",
                         account.rest_url,
-                        keystore.fingerprint,
                     )
 
-                    # Od razu sprawdzamy, czy nowo utworzone konto
-                    # naprawdę pozwala pobrać uczniów.
                     session = async_get_clientsession(self.hass)
 
                     client = Vulcan(
@@ -121,80 +127,91 @@ class VulcanUonetConfigFlow(
                         session=session,
                     )
 
+                    _LOGGER.warning(
+                        "Vulcan UONET+: testuję pobranie listy uczniów"
+                    )
+
                     students = await client.get_students()
 
                     if not students:
                         _LOGGER.error(
-                            "Vulcan UONET+: rejestracja powiodła się, "
-                            "ale konto nie zawiera uczniów"
+                            "Vulcan UONET+: konto nie zawiera uczniów"
                         )
                         errors["base"] = "no_students"
 
                     else:
                         _LOGGER.warning(
-                            "Vulcan UONET+: test API zakończony "
-                            "poprawnie; liczba uczniów: %s",
+                            "Vulcan UONET+: test API zakończony poprawnie; "
+                            "liczba uczniów: %s",
                             len(students),
                         )
 
-                except InvalidTokenException:
+                except InvalidTokenException as err:
                     _LOGGER.exception(
-                        "Vulcan UONET+: nieprawidłowy token"
+                        "Vulcan UONET+: nieprawidłowy token: %s",
+                        err,
                     )
                     errors["base"] = "invalid_token"
 
-                except InvalidPINException:
+                except InvalidPINException as err:
                     _LOGGER.exception(
-                        "Vulcan UONET+: nieprawidłowy PIN"
+                        "Vulcan UONET+: nieprawidłowy PIN: %s",
+                        err,
                     )
                     errors["base"] = "invalid_pin"
 
-                except ExpiredTokenException:
+                except ExpiredTokenException as err:
                     _LOGGER.exception(
-                        "Vulcan UONET+: token wygasł"
+                        "Vulcan UONET+: token wygasł: %s",
+                        err,
                     )
                     errors["base"] = "expired_token"
 
-                except InvalidSymbolException:
+                except InvalidSymbolException as err:
                     _LOGGER.exception(
-                        "Vulcan UONET+: nieprawidłowy symbol jednostki"
+                        "Vulcan UONET+: nieprawidłowy symbol: %s",
+                        err,
                     )
                     errors["base"] = "invalid_symbol"
 
-                except UnauthorizedCertificateException:
+                except UnauthorizedCertificateException as err:
                     _LOGGER.exception(
                         "Vulcan UONET+: certyfikat urządzenia "
-                        "nie został zaakceptowany"
+                        "został odrzucony: %s",
+                        err,
                     )
                     errors["base"] = "invalid_certificate"
 
                 except (
                     asyncio.TimeoutError,
                     aiohttp.ClientError,
-                ):
+                ) as err:
                     _LOGGER.exception(
-                        "Vulcan UONET+: błąd połączenia"
+                        "Vulcan UONET+: błąd połączenia: %s",
+                        err,
                     )
                     errors["base"] = "cannot_connect"
 
-                except VulcanAPIException:
+                except VulcanAPIException as err:
                     _LOGGER.exception(
-                        "Vulcan UONET+: błąd API Vulcan"
+                        "Vulcan UONET+: błąd API Vulcan: %s",
+                        err,
                     )
                     errors["base"] = "api_error"
 
-                except Exception:
+                except Exception as err:
                     _LOGGER.exception(
-                        "Vulcan UONET+: nieoczekiwany błąd "
-                        "podczas rejestracji"
+                        "Vulcan UONET+: nieoczekiwany błąd podczas "
+                        "rejestracji. Typ=%s, treść=%r",
+                        type(err).__name__,
+                        err,
                     )
                     errors["base"] = "unknown"
 
                 else:
                     if not errors:
                         unique_id = (
-                            f"{symbol}_"
-                            f"{keystore.fingerprint}"
+                            f"{symbol}_{keystore.fingerprint}"
                         )
 
                         await self.async_set_unique_id(
@@ -203,9 +220,7 @@ class VulcanUonetConfigFlow(
                         self._abort_if_unique_id_configured()
 
                         return self.async_create_entry(
-                            title=(
-                                f"Vulcan UONET+ – {symbol}"
-                            ),
+                            title=f"Vulcan UONET+ – {symbol}",
                             data={
                                 CONF_SYMBOL: symbol,
                                 CONF_DEVICE_MODEL: device_model,
