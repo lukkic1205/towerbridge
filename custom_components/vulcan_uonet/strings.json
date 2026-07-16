@@ -1,0 +1,31 @@
+{
+  "title": "Vulcan UONET+",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Połącz z Vulcan UONET+",
+        "description": "Podaj dane rejestracyjne wygenerowane w aplikacji UONET+.",
+        "data": {
+          "token": "Token",
+          "symbol": "Symbol jednostki",
+          "pin": "PIN",
+          "device_model": "Nazwa urządzenia"
+        },
+        "data_description": {
+          "token": "Token wygenerowany podczas rejestracji urządzenia w UONET+.",
+          "symbol": "Symbol jednostki, na przykład gdansk.",
+          "pin": "PIN wygenerowany razem z tokenem.",
+          "device_model": "Nazwa urządzenia widoczna po stronie Vulcana."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie udało się połączyć z usługą Vulcan.",
+      "invalid_auth": "Token, PIN lub symbol są nieprawidłowe.",
+      "unknown": "Wystąpił nieznany błąd."
+    },
+    "abort": {
+      "already_configured": "To konto jest już skonfigurowane."
+    }
+  }
+}
