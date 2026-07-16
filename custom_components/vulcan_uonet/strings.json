@@ -23,6 +23,16 @@
       "cannot_connect": "Nie udało się połączyć z usługą Vulcan.",
       "invalid_auth": "Token, PIN lub symbol są nieprawidłowe.",
       "unknown": "Wystąpił nieznany błąd."
+      "required": "To pole jest wymagane.",
+      "invalid_token": "Token jest nieprawidłowy.",
+      "invalid_pin": "PIN jest nieprawidłowy.",
+      "expired_token": "Token wygasł. Wygeneruj nowy token i PIN.",
+      "invalid_symbol": "Symbol jednostki jest nieprawidłowy.",
+      "invalid_certificate": "Vulcan odrzucił certyfikat urządzenia.",
+      "no_students": "Konto zostało zarejestrowane, ale nie znaleziono uczniów.",
+      "api_error": "Usługa Vulcan zwróciła błąd.",
+      "cannot_connect": "Nie udało się połączyć z usługą Vulcan.",
+      "unknown": "Wystąpił nieoczekiwany błąd."
     },
     "abort": {
       "already_configured": "To konto jest już skonfigurowane."
