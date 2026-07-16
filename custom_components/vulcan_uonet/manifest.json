@@ -1,0 +1,12 @@
+{
+  "domain": "vulcan_uonet",
+  "name": "Vulcan UONET+",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/lukkic1502/towerbridge",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}
