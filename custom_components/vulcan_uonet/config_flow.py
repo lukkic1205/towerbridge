@@ -2,27 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
-from vulcan import Account, Keystore, Vulcan
-from vulcan._exceptions import (
-    ExpiredTokenException,
-    InvalidPINException,
-    InvalidSymbolException,
-    InvalidTokenException,
-    UnauthorizedCertificateException,
-    VulcanAPIException,
-)
 
 from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .compat import apply_signer_patch
 from .const import (
     CONF_DEVICE_MODEL,
     CONF_PIN,
@@ -47,18 +34,21 @@ class VulcanUonetConfigFlow(
     async def async_step_user(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
-        """Obsłuż formularz konfiguracji."""
+    ):
+        """Wyświetl formularz i zarejestruj urządzenie."""
 
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            token = user_input[CONF_TOKEN].strip()
-            symbol = user_input[CONF_SYMBOL].strip().lower()
-            pin = user_input[CONF_PIN].strip()
-            device_model = user_input[
-                CONF_DEVICE_MODEL
-            ].strip()
+            token = str(user_input.get(CONF_TOKEN, "")).strip()
+            symbol = str(user_input.get(CONF_SYMBOL, "")).strip().lower()
+            pin = str(user_input.get(CONF_PIN, "")).strip()
+            device_model = str(
+                user_input.get(
+                    CONF_DEVICE_MODEL,
+                    DEFAULT_DEVICE_MODEL,
+                )
+            ).strip()
 
             if not token:
                 errors[CONF_TOKEN] = "required"
@@ -74,36 +64,27 @@ class VulcanUonetConfigFlow(
 
             if not errors:
                 try:
+                    # Importy są celowo tutaj, a nie na początku pliku.
+                    # Dzięki temu formularz może się otworzyć nawet wtedy,
+                    # gdy któraś biblioteka zewnętrzna ma problem.
+                    from vulcan import Account, Keystore, Vulcan
+
+                    from .compat import apply_signer_patch
+
                     _LOGGER.warning(
-                        "Vulcan UONET+: rozpoczynam konfigurację dla symbolu %s",
+                        "Vulcan UONET+: rozpoczynam rejestrację dla symbolu %s",
                         symbol,
                     )
 
-                    _LOGGER.warning(
-                        "Vulcan UONET+: aktywuję signer "
-                        "uonet_request_signer_hebe"
-                    )
-
                     apply_signer_patch()
-
-                    _LOGGER.warning(
-                        "Vulcan UONET+: tworzę keystore X.509 "
-                        "dla urządzenia %s",
-                        device_model,
-                    )
 
                     keystore = await Keystore.create(
                         device_model=device_model,
                     )
 
                     _LOGGER.warning(
-                        "Vulcan UONET+: keystore utworzony, "
-                        "fingerprint=%s",
+                        "Vulcan UONET+: utworzono keystore, fingerprint=%s",
                         keystore.fingerprint,
-                    )
-
-                    _LOGGER.warning(
-                        "Vulcan UONET+: rozpoczynam rejestrację urządzenia"
                     )
 
                     account = await Account.register(
@@ -114,8 +95,7 @@ class VulcanUonetConfigFlow(
                     )
 
                     _LOGGER.warning(
-                        "Vulcan UONET+: rejestracja zakończona; "
-                        "RestURL=%s",
+                        "Vulcan UONET+: rejestracja zakończona, RestURL=%s",
                         account.rest_url,
                     )
 
@@ -127,95 +107,47 @@ class VulcanUonetConfigFlow(
                         session=session,
                     )
 
-                    _LOGGER.warning(
-                        "Vulcan UONET+: testuję pobranie listy uczniów"
-                    )
-
                     students = await client.get_students()
 
                     if not students:
-                        _LOGGER.error(
-                            "Vulcan UONET+: konto nie zawiera uczniów"
-                        )
                         errors["base"] = "no_students"
-
                     else:
                         _LOGGER.warning(
-                            "Vulcan UONET+: test API zakończony poprawnie; "
-                            "liczba uczniów: %s",
+                            "Vulcan UONET+: test API poprawny, uczniowie=%s",
                             len(students),
                         )
 
-                except InvalidTokenException as err:
-                    _LOGGER.exception(
-                        "Vulcan UONET+: nieprawidłowy token: %s",
-                        err,
-                    )
-                    errors["base"] = "invalid_token"
-
-                except InvalidPINException as err:
-                    _LOGGER.exception(
-                        "Vulcan UONET+: nieprawidłowy PIN: %s",
-                        err,
-                    )
-                    errors["base"] = "invalid_pin"
-
-                except ExpiredTokenException as err:
-                    _LOGGER.exception(
-                        "Vulcan UONET+: token wygasł: %s",
-                        err,
-                    )
-                    errors["base"] = "expired_token"
-
-                except InvalidSymbolException as err:
-                    _LOGGER.exception(
-                        "Vulcan UONET+: nieprawidłowy symbol: %s",
-                        err,
-                    )
-                    errors["base"] = "invalid_symbol"
-
-                except UnauthorizedCertificateException as err:
-                    _LOGGER.exception(
-                        "Vulcan UONET+: certyfikat urządzenia "
-                        "został odrzucony: %s",
-                        err,
-                    )
-                    errors["base"] = "invalid_certificate"
-
-                except (
-                    asyncio.TimeoutError,
-                    aiohttp.ClientError,
-                ) as err:
-                    _LOGGER.exception(
-                        "Vulcan UONET+: błąd połączenia: %s",
-                        err,
-                    )
-                    errors["base"] = "cannot_connect"
-
-                except VulcanAPIException as err:
-                    _LOGGER.exception(
-                        "Vulcan UONET+: błąd API Vulcan: %s",
-                        err,
-                    )
-                    errors["base"] = "api_error"
-
                 except Exception as err:
+                    error_name = type(err).__name__
+
                     _LOGGER.exception(
-                        "Vulcan UONET+: nieoczekiwany błąd podczas "
-                        "rejestracji. Typ=%s, treść=%r",
-                        type(err).__name__,
+                        "Vulcan UONET+: błąd konfiguracji. Typ=%s, treść=%r",
+                        error_name,
                         err,
                     )
-                    errors["base"] = "unknown"
+
+                    error_map = {
+                        "InvalidTokenException": "invalid_token",
+                        "InvalidPINException": "invalid_pin",
+                        "ExpiredTokenException": "expired_token",
+                        "InvalidSymbolException": "invalid_symbol",
+                        "UnauthorizedCertificateException": (
+                            "invalid_certificate"
+                        ),
+                        "ClientConnectionError": "cannot_connect",
+                        "ClientConnectorError": "cannot_connect",
+                        "TimeoutError": "cannot_connect",
+                    }
+
+                    errors["base"] = error_map.get(
+                        error_name,
+                        "unknown",
+                    )
 
                 else:
                     if not errors:
-                        unique_id = (
-                            f"{symbol}_{keystore.fingerprint}"
-                        )
-
                         await self.async_set_unique_id(
-                            unique_id
+                            f"{symbol}_{keystore.fingerprint}"
                         )
                         self._abort_if_unique_id_configured()
 
@@ -229,7 +161,7 @@ class VulcanUonetConfigFlow(
                             },
                         )
 
-        data_schema = vol.Schema(
+        schema = vol.Schema(
             {
                 vol.Required(
                     CONF_TOKEN,
@@ -274,6 +206,6 @@ class VulcanUonetConfigFlow(
 
         return self.async_show_form(
             step_id="user",
-            data_schema=data_schema,
+            data_schema=schema,
             errors=errors,
         )
