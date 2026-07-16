@@ -11,5 +11,5 @@
     "vulcan-api==2.4.2",
     "uonet-request-signer-hebe"
   ],
-  "version": "0.1.10"
+  "version": "0.1.11"
 }
