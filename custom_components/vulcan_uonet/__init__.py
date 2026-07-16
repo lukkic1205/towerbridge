@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
 from vulcan import Account, Keystore, Vulcan
@@ -12,6 +13,8 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
 from .coordinator import VulcanUonetCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = [Platform.SENSOR]
 
@@ -34,6 +37,11 @@ async def async_setup_entry(
     entry: VulcanUonetConfigEntry,
 ) -> bool:
     """Uruchom integrację z wpisu konfiguracji."""
+
+    _LOGGER.warning(
+        "Vulcan UONET+: rozpoczynam uruchamianie wpisu %s",
+        entry.title,
+    )
 
     account_data = entry.data["account"]
     keystore_data = entry.data["keystore"]
@@ -62,7 +70,23 @@ async def async_setup_entry(
         client=client,
     )
 
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+
+    except Exception:
+        _LOGGER.exception(
+            "Vulcan UONET+: pierwsze pobranie danych nie powiodło się"
+        )
+
+        try:
+            await client.close()
+
+        except Exception:
+            _LOGGER.exception(
+                "Vulcan UONET+: nie udało się zamknąć klienta po błędzie"
+            )
+
+        raise
 
     entry.runtime_data = VulcanUonetRuntimeData(
         account=account,
@@ -76,6 +100,10 @@ async def async_setup_entry(
         PLATFORMS,
     )
 
+    _LOGGER.warning(
+        "Vulcan UONET+: integracja została uruchomiona poprawnie"
+    )
+
     return True
 
 
@@ -83,7 +111,7 @@ async def async_unload_entry(
     hass: HomeAssistant,
     entry: VulcanUonetConfigEntry,
 ) -> bool:
-    """Wyładuj integrację."""
+    """Wyładuj integrację i zamknij połączenie."""
 
     unload_ok = await hass.config_entries.async_unload_platforms(
         entry,
@@ -91,6 +119,12 @@ async def async_unload_entry(
     )
 
     if unload_ok:
-        await entry.runtime_data.client.close()
+        try:
+            await entry.runtime_data.client.close()
+
+        except Exception:
+            _LOGGER.exception(
+                "Vulcan UONET+: błąd podczas zamykania klienta"
+            )
 
     return unload_ok
