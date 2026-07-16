@@ -4,9 +4,11 @@
   "codeowners": [],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/lukkic1502/towerbridge",
+  "documentation": "https://github.com/TWOJ_LOGIN/towerbridge",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "requirements": [],
+  "requirements": [
+    "vulcan-api==2.4.2"
+  ],
   "version": "0.1.0"
 }
