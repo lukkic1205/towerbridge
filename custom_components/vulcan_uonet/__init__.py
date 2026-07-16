@@ -12,6 +12,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .compat import apply_signer_patch
 from .coordinator import VulcanUonetCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,24 +44,16 @@ async def async_setup_entry(
         entry.title,
     )
 
+    apply_signer_patch()
+
     account_data = entry.data["account"]
     keystore_data = entry.data["keystore"]
-
-    _LOGGER.warning(
-        "Vulcan UONET+: zapisane klucze konta: %s",
-        list(account_data.keys()),
-    )
-
-    _LOGGER.warning(
-        "Vulcan UONET+: zapisany RestURL: %s",
-        account_data.get("RestURL"),
-    )
 
     account = Account.load(account_data)
     keystore = Keystore.load(keystore_data)
 
     _LOGGER.warning(
-        "Vulcan UONET+: odtworzony account.rest_url: %s",
+        "Vulcan UONET+: RestURL konta: %s",
         account.rest_url,
     )
 
