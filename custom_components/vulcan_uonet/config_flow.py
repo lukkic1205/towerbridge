@@ -8,7 +8,6 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_DEVICE_MODEL,
@@ -40,9 +39,18 @@ class VulcanUonetConfigFlow(
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            token = str(user_input.get(CONF_TOKEN, "")).strip()
-            symbol = str(user_input.get(CONF_SYMBOL, "")).strip().lower()
-            pin = str(user_input.get(CONF_PIN, "")).strip()
+            token = str(
+                user_input.get(CONF_TOKEN, "")
+            ).strip()
+
+            symbol = str(
+                user_input.get(CONF_SYMBOL, "")
+            ).strip().lower()
+
+            pin = str(
+                user_input.get(CONF_PIN, "")
+            ).strip()
+
             device_model = str(
                 user_input.get(
                     CONF_DEVICE_MODEL,
@@ -64,56 +72,93 @@ class VulcanUonetConfigFlow(
 
             if not errors:
                 try:
-                    # Importy są celowo tutaj, a nie na początku pliku.
-                    # Dzięki temu formularz może się otworzyć nawet wtedy,
-                    # gdy któraś biblioteka zewnętrzna ma problem.
+                    # Importy celowo wewnątrz kroku.
                     from vulcan import Account, Keystore, Vulcan
 
                     from .compat import apply_signer_patch
 
                     _LOGGER.warning(
-                        "Vulcan UONET+: rozpoczynam rejestrację dla symbolu %s",
+                        "Vulcan UONET+: rozpoczynam rejestrację. "
+                        "Symbol=%s, urządzenie=%s",
                         symbol,
+                        device_model,
                     )
 
                     apply_signer_patch()
+
+                    _LOGGER.warning(
+                        "Vulcan UONET+: tworzę keystore X.509"
+                    )
 
                     keystore = await Keystore.create(
                         device_model=device_model,
                     )
 
+                    fingerprint = getattr(
+                        keystore,
+                        "fingerprint",
+                        None,
+                    )
+
                     _LOGGER.warning(
-                        "Vulcan UONET+: utworzono keystore, fingerprint=%s",
-                        keystore.fingerprint,
+                        "Vulcan UONET+: keystore został utworzony. "
+                        "Fingerprint=%s",
+                        fingerprint,
+                    )
+
+                    _LOGGER.warning(
+                        "Vulcan UONET+: wysyłam rejestrację urządzenia"
                     )
 
                     account = await Account.register(
-                        keystore=keystore,
-                        token=token,
-                        symbol=symbol,
-                        pin=pin,
+                        keystore,
+                        token,
+                        symbol,
+                        pin,
+                    )
+
+                    rest_url = getattr(
+                        account,
+                        "rest_url",
+                        None,
                     )
 
                     _LOGGER.warning(
-                        "Vulcan UONET+: rejestracja zakończona, RestURL=%s",
-                        account.rest_url,
+                        "Vulcan UONET+: urządzenie zarejestrowane. "
+                        "RestURL=%s",
+                        rest_url,
                     )
 
-                    session = async_get_clientsession(self.hass)
+                    _LOGGER.warning(
+                        "Vulcan UONET+: rozpoczynam test get_students()"
+                    )
 
+                    # Dokładnie tak jak w działającym skrypcie:
+                    # klient ma własną sesję i zostaje zamknięty
+                    # przez async with.
                     client = Vulcan(
-                        keystore=keystore,
-                        account=account,
-                        session=session,
+                        keystore,
+                        account,
                     )
 
-                    students = await client.get_students()
+                    async with client:
+                        students = await client.get_students()
+
+                    _LOGGER.warning(
+                        "Vulcan UONET+: klient testowy został zamknięty"
+                    )
 
                     if not students:
+                        _LOGGER.error(
+                            "Vulcan UONET+: konto działa, "
+                            "ale nie znaleziono uczniów"
+                        )
                         errors["base"] = "no_students"
+
                     else:
                         _LOGGER.warning(
-                            "Vulcan UONET+: test API poprawny, uczniowie=%s",
+                            "Vulcan UONET+: test API zakończony "
+                            "poprawnie. Liczba uczniów=%s",
                             len(students),
                         )
 
@@ -121,7 +166,8 @@ class VulcanUonetConfigFlow(
                     error_name = type(err).__name__
 
                     _LOGGER.exception(
-                        "Vulcan UONET+: błąd konfiguracji. Typ=%s, treść=%r",
+                        "Vulcan UONET+: konfiguracja zakończona błędem. "
+                        "Typ=%s, treść=%r",
                         error_name,
                         err,
                     )
@@ -136,7 +182,11 @@ class VulcanUonetConfigFlow(
                         ),
                         "ClientConnectionError": "cannot_connect",
                         "ClientConnectorError": "cannot_connect",
+                        "ClientResponseError": "cannot_connect",
+                        "ServerDisconnectedError": "cannot_connect",
                         "TimeoutError": "cannot_connect",
+                        "ConnectionError": "cannot_connect",
+                        "RuntimeError": "runtime_error",
                     }
 
                     errors["base"] = error_map.get(
@@ -146,9 +196,47 @@ class VulcanUonetConfigFlow(
 
                 else:
                     if not errors:
-                        await self.async_set_unique_id(
-                            f"{symbol}_{keystore.fingerprint}"
+                        account_data = getattr(
+                            account,
+                            "as_dict",
+                            None,
                         )
+
+                        if callable(account_data):
+                            account_data = account_data()
+
+                        keystore_data = getattr(
+                            keystore,
+                            "as_dict",
+                            None,
+                        )
+
+                        if callable(keystore_data):
+                            keystore_data = keystore_data()
+
+                        if not isinstance(account_data, dict):
+                            raise ValueError(
+                                "Account.as_dict nie zwrócił słownika"
+                            )
+
+                        if not isinstance(keystore_data, dict):
+                            raise ValueError(
+                                "Keystore.as_dict nie zwrócił słownika"
+                            )
+
+                        login_id = account_data.get(
+                            "LoginId",
+                            "",
+                        )
+
+                        unique_id = (
+                            f"{symbol}_{login_id}_{fingerprint}"
+                        )
+
+                        await self.async_set_unique_id(
+                            unique_id
+                        )
+
                         self._abort_if_unique_id_configured()
 
                         return self.async_create_entry(
@@ -156,8 +244,8 @@ class VulcanUonetConfigFlow(
                             data={
                                 CONF_SYMBOL: symbol,
                                 CONF_DEVICE_MODEL: device_model,
-                                "account": account.as_dict,
-                                "keystore": keystore.as_dict,
+                                "account": account_data,
+                                "keystore": keystore_data,
                             },
                         )
 
@@ -171,6 +259,7 @@ class VulcanUonetConfigFlow(
                         else ""
                     ),
                 ): str,
+
                 vol.Required(
                     CONF_SYMBOL,
                     default=(
@@ -182,6 +271,7 @@ class VulcanUonetConfigFlow(
                         else DEFAULT_SYMBOL
                     ),
                 ): str,
+
                 vol.Required(
                     CONF_PIN,
                     default=(
@@ -190,6 +280,7 @@ class VulcanUonetConfigFlow(
                         else ""
                     ),
                 ): str,
+
                 vol.Optional(
                     CONF_DEVICE_MODEL,
                     default=(
