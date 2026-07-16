@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import date, datetime, timedelta
 import logging
-from typing import Any, AsyncIterator
+from typing import Any
 
 from vulcan import Vulcan
 
@@ -49,7 +50,7 @@ def vulcan_datetime_to_iso(value: Any) -> str | None:
 
     if isinstance(date_value, date):
         if time_value:
-            return f"{date_value.isoformat()}T{str(time_value)}"
+            return f"{date_value.isoformat()}T{time_value}"
 
         return date_value.isoformat()
 
@@ -84,8 +85,35 @@ async def collect_items(
     return items
 
 
+async def safely_collect(
+    label: str,
+    awaitable: Any,
+) -> list[Any]:
+    """Pobierz kategorię danych bez blokowania całej integracji."""
+
+    try:
+        generator = await awaitable
+        items = await collect_items(generator)
+
+        _LOGGER.info(
+            "Vulcan: pobrano kategorię %s, liczba rekordów: %s",
+            label,
+            len(items),
+        )
+
+        return items
+
+    except Exception:
+        _LOGGER.exception(
+            "Vulcan: błąd podczas pobierania kategorii %s",
+            label,
+        )
+
+        return []
+
+
 def lesson_to_dict(lesson: Any) -> dict[str, Any]:
-    """Zamień lekcję na prosty słownik."""
+    """Zamień lekcję na słownik."""
 
     subject = safe_get(lesson, "subject")
     teacher = safe_get(lesson, "teacher")
@@ -120,15 +148,17 @@ def lesson_to_dict(lesson: Any) -> dict[str, Any]:
         "class": safe_get(team_class, "display_name"),
         "visible": safe_get(lesson, "visible", True),
         "changed": changes is not None,
-        "change_type": str(
-            safe_get(changes, "type", "")
-        ) or None,
+        "change_type": (
+            str(safe_get(changes, "type"))
+            if changes is not None
+            else None
+        ),
         "event": str(event) if event else None,
     }
 
 
 def exam_to_dict(exam: Any) -> dict[str, Any]:
-    """Zamień sprawdzian na prosty słownik."""
+    """Zamień sprawdzian na słownik."""
 
     subject = safe_get(exam, "subject")
     creator = safe_get(exam, "creator")
@@ -154,7 +184,7 @@ def exam_to_dict(exam: Any) -> dict[str, Any]:
 
 
 def grade_to_dict(grade: Any) -> dict[str, Any]:
-    """Zamień ocenę na prosty słownik."""
+    """Zamień ocenę na słownik."""
 
     column = safe_get(grade, "column")
     subject = safe_get(column, "subject")
@@ -186,7 +216,7 @@ def grade_to_dict(grade: Any) -> dict[str, Any]:
 
 
 def homework_to_dict(homework: Any) -> dict[str, Any]:
-    """Zamień zadanie domowe na prosty słownik."""
+    """Zamień zadanie domowe na słownik."""
 
     subject = safe_get(homework, "subject")
     creator = safe_get(homework, "creator")
@@ -201,7 +231,9 @@ def homework_to_dict(homework: Any) -> dict[str, Any]:
             else:
                 attachment_list.append(str(attachment))
     except Exception:
-        attachment_list = []
+        _LOGGER.exception(
+            "Vulcan: błąd przetwarzania załączników zadania"
+        )
 
     return {
         "id": safe_get(homework, "id"),
@@ -235,8 +267,13 @@ def homework_to_dict(homework: Any) -> dict[str, Any]:
 def attendance_to_dict(attendance: Any) -> dict[str, Any]:
     """Zamień wpis frekwencji na słownik."""
 
-    if hasattr(attendance, "as_dict"):
-        return attendance.as_dict
+    try:
+        if hasattr(attendance, "as_dict"):
+            return attendance.as_dict
+    except Exception:
+        _LOGGER.exception(
+            "Vulcan: błąd konwersji wpisu frekwencji"
+        )
 
     return {
         "value": str(attendance),
@@ -247,53 +284,101 @@ async def fetch_for_student(
     client: Vulcan,
     student: Any,
 ) -> dict[str, Any]:
-    """Pobierz wszystkie dostępne dane jednego ucznia."""
+    """Pobierz dane jednego ucznia."""
+
+    pupil = safe_get(student, "pupil")
+    pupil_id = safe_get(pupil, "id")
+    first_name = safe_get(pupil, "first_name", "Uczeń")
+    last_name = safe_get(pupil, "last_name", "")
+
+    _LOGGER.info(
+        "Vulcan: rozpoczynam pobieranie danych ucznia %s, ID %s",
+        first_name,
+        pupil_id,
+    )
 
     client._api.student = student  # noqa: SLF001
 
     start = date.today() - timedelta(days=DAYS_BACK)
     end = date.today() + timedelta(days=DAYS_FORWARD)
 
-    lessons_generator = await client.data.get_lessons(
-        date_from=start,
-        date_to=end,
+    lessons_raw = await safely_collect(
+        f"lekcje/{first_name}",
+        client.data.get_lessons(
+            date_from=start,
+            date_to=end,
+        ),
     )
 
-    exams_generator = await client.data.get_exams()
-    grades_generator = await client.data.get_grades()
-    homework_generator = await client.data.get_homework()
-
-    attendance_generator = await client.data.get_attendance(
-        date_from=start,
-        date_to=end,
+    exams_raw = await safely_collect(
+        f"sprawdziany/{first_name}",
+        client.data.get_exams(),
     )
 
-    lessons_raw = await collect_items(lessons_generator)
-    exams_raw = await collect_items(exams_generator)
-    grades_raw = await collect_items(grades_generator)
-    homework_raw = await collect_items(homework_generator)
-    attendance_raw = await collect_items(attendance_generator)
+    grades_raw = await safely_collect(
+        f"oceny/{first_name}",
+        client.data.get_grades(),
+    )
 
-    lessons = [
-        lesson_to_dict(item)
-        for item in lessons_raw
-        if safe_get(item, "visible", True)
-    ]
+    homework_raw = await safely_collect(
+        f"zadania/{first_name}",
+        client.data.get_homework(),
+    )
 
-    exams = [
-        exam_to_dict(item)
-        for item in exams_raw
-    ]
+    attendance_raw = await safely_collect(
+        f"frekwencja/{first_name}",
+        client.data.get_attendance(
+            date_from=start,
+            date_to=end,
+        ),
+    )
 
-    grades = [
-        grade_to_dict(item)
-        for item in grades_raw
-    ]
+    lessons: list[dict[str, Any]] = []
 
-    homework = [
-        homework_to_dict(item)
-        for item in homework_raw
-    ]
+    for item in lessons_raw:
+        try:
+            lesson = lesson_to_dict(item)
+
+            if lesson["visible"]:
+                lessons.append(lesson)
+        except Exception:
+            _LOGGER.exception(
+                "Vulcan: błąd konwersji lekcji ucznia %s",
+                first_name,
+            )
+
+    exams: list[dict[str, Any]] = []
+
+    for item in exams_raw:
+        try:
+            exams.append(exam_to_dict(item))
+        except Exception:
+            _LOGGER.exception(
+                "Vulcan: błąd konwersji sprawdzianu ucznia %s",
+                first_name,
+            )
+
+    grades: list[dict[str, Any]] = []
+
+    for item in grades_raw:
+        try:
+            grades.append(grade_to_dict(item))
+        except Exception:
+            _LOGGER.exception(
+                "Vulcan: błąd konwersji oceny ucznia %s",
+                first_name,
+            )
+
+    homework: list[dict[str, Any]] = []
+
+    for item in homework_raw:
+        try:
+            homework.append(homework_to_dict(item))
+        except Exception:
+            _LOGGER.exception(
+                "Vulcan: błąd konwersji zadania ucznia %s",
+                first_name,
+            )
 
     attendance = [
         attendance_to_dict(item)
@@ -333,10 +418,15 @@ async def fetch_for_student(
             ),
         }
 
-    except Exception as err:
-        _LOGGER.debug(
-            "Nie udało się pobrać szczęśliwego numerka: %s",
-            err,
+        _LOGGER.info(
+            "Vulcan: pobrano szczęśliwy numerek ucznia %s",
+            first_name,
+        )
+
+    except Exception:
+        _LOGGER.exception(
+            "Vulcan: błąd pobierania szczęśliwego numerka ucznia %s",
+            first_name,
         )
 
         lucky_number = {
@@ -344,25 +434,10 @@ async def fetch_for_student(
             "number": None,
         }
 
-    pupil = safe_get(student, "pupil")
     unit = safe_get(student, "unit")
     school = safe_get(student, "school")
 
-    first_name = safe_get(
-        pupil,
-        "first_name",
-        "Uczeń",
-    )
-
-    last_name = safe_get(
-        pupil,
-        "last_name",
-        "",
-    )
-
-    pupil_id = safe_get(pupil, "id")
-
-    return {
+    result = {
         "id": pupil_id,
         "first_name": first_name,
         "last_name": last_name,
@@ -387,11 +462,27 @@ async def fetch_for_student(
         "lucky_number": lucky_number,
     }
 
+    _LOGGER.info(
+        (
+            "Vulcan: zakończono ucznia %s: "
+            "lekcje=%s, sprawdziany=%s, oceny=%s, "
+            "zadania=%s, frekwencja=%s"
+        ),
+        first_name,
+        len(lessons),
+        len(exams),
+        len(grades),
+        len(homework),
+        len(attendance),
+    )
+
+    return result
+
 
 class VulcanUonetCoordinator(
     DataUpdateCoordinator[dict[str, Any]]
 ):
-    """Koordynator pobierania danych Vulcan UONET+."""
+    """Koordynator danych Vulcan UONET+."""
 
     def __init__(
         self,
@@ -412,22 +503,47 @@ class VulcanUonetCoordinator(
     async def _async_update_data(self) -> dict[str, Any]:
         """Pobierz dane wszystkich uczniów."""
 
+        _LOGGER.info(
+            "Vulcan: rozpoczęcie pełnego odświeżenia"
+        )
+
         try:
             students = await self.client.get_students()
 
-            if not students:
-                raise UpdateFailed(
-                    "Konto Vulcan nie zawiera uczniów"
-                )
+        except Exception as err:
+            _LOGGER.exception(
+                "Vulcan: nie udało się pobrać listy uczniów"
+            )
 
-            output: dict[str, Any] = {
-                "updated_at": datetime.now().isoformat(
-                    timespec="seconds"
-                ),
-                "students": {},
-            }
+            raise UpdateFailed(
+                f"Nie udało się pobrać listy uczniów: {err}"
+            ) from err
 
-            for student in students:
+        if not students:
+            _LOGGER.error(
+                "Vulcan: konto nie zawiera żadnych uczniów"
+            )
+
+            raise UpdateFailed(
+                "Konto Vulcan nie zawiera żadnych uczniów"
+            )
+
+        _LOGGER.info(
+            "Vulcan: liczba uczniów na koncie: %s",
+            len(students),
+        )
+
+        output: dict[str, Any] = {
+            "updated_at": datetime.now().isoformat(
+                timespec="seconds"
+            ),
+            "students": {},
+        }
+
+        successful_students = 0
+
+        for student in students:
+            try:
                 student_data = await fetch_for_student(
                     self.client,
                     student,
@@ -436,13 +552,30 @@ class VulcanUonetCoordinator(
                 student_id = str(student_data["id"])
 
                 output["students"][student_id] = student_data
+                successful_students += 1
 
-            return output
+            except Exception:
+                pupil = safe_get(student, "pupil")
+                first_name = safe_get(
+                    pupil,
+                    "first_name",
+                    "nieznany",
+                )
 
-        except UpdateFailed:
-            raise
+                _LOGGER.exception(
+                    "Vulcan: krytyczny błąd obsługi ucznia %s",
+                    first_name,
+                )
 
-        except Exception as err:
+        if successful_students == 0:
             raise UpdateFailed(
-                f"Nie udało się pobrać danych z Vulcan: {err}"
-            ) from err
+                "Nie udało się pobrać danych żadnego ucznia"
+            )
+
+        _LOGGER.info(
+            "Vulcan: zakończono pełne odświeżenie, uczniowie: %s/%s",
+            successful_students,
+            len(students),
+        )
+
+        return output
