@@ -11,6 +11,7 @@ from vulcan import Account, Keystore, Vulcan
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .coordinator import VulcanUonetCoordinator
 
@@ -60,9 +61,12 @@ async def async_setup_entry(
         )
     )
 
+    session = async_get_clientsession(hass)
+
     client = Vulcan(
         keystore=keystore,
         account=account,
+        session=session,
     )
 
     coordinator = VulcanUonetCoordinator(
@@ -77,15 +81,6 @@ async def async_setup_entry(
         _LOGGER.exception(
             "Vulcan UONET+: pierwsze pobranie danych nie powiodło się"
         )
-
-        try:
-            await client.close()
-
-        except Exception:
-            _LOGGER.exception(
-                "Vulcan UONET+: nie udało się zamknąć klienta po błędzie"
-            )
-
         raise
 
     entry.runtime_data = VulcanUonetRuntimeData(
@@ -111,20 +106,9 @@ async def async_unload_entry(
     hass: HomeAssistant,
     entry: VulcanUonetConfigEntry,
 ) -> bool:
-    """Wyładuj integrację i zamknij połączenie."""
+    """Wyładuj integrację."""
 
-    unload_ok = await hass.config_entries.async_unload_platforms(
+    return await hass.config_entries.async_unload_platforms(
         entry,
         PLATFORMS,
     )
-
-    if unload_ok:
-        try:
-            await entry.runtime_data.client.close()
-
-        except Exception:
-            _LOGGER.exception(
-                "Vulcan UONET+: błąd podczas zamykania klienta"
-            )
-
-    return unload_ok
