@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -82,6 +83,69 @@ def _install_pyopenssl_sign_compatibility() -> None:
     )
 
 
+def _legacy_datetime_payload(value: str) -> dict[str, Any]:
+    """Zamień datę YYYY-MM-DD na dawny obiekt DateTime vulcan-api."""
+
+    parsed = datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+
+    return {
+        "Timestamp": int(parsed.timestamp() * 1000),
+        "Date": value,
+        "Time": "00:00:00",
+    }
+
+
+def _install_period_fields_compatibility() -> None:
+    """Obsłuż nowe pola StartAt/EndAt zwracane przez Vulcan."""
+
+    from vulcan._endpoints import STUDENT_LIST
+    from vulcan.model import Student
+
+    current_get = getattr(Student, "get")
+    current_func = getattr(current_get, "__func__", current_get)
+
+    if getattr(current_func, "_towerbridge_period_compat", False):
+        return
+
+    async def compatibility_get(cls, api, state, **kwargs):
+        data = await api.get(STUDENT_LIST, **kwargs)
+        fixed_fields = 0
+
+        for student in data:
+            for period in student.get("Periods") or []:
+                if "Start" not in period and period.get("StartAt"):
+                    period["Start"] = _legacy_datetime_payload(
+                        period["StartAt"]
+                    )
+                    fixed_fields += 1
+
+                if "End" not in period and period.get("EndAt"):
+                    period["End"] = _legacy_datetime_payload(
+                        period["EndAt"]
+                    )
+                    fixed_fields += 1
+
+        if fixed_fields:
+            _LOGGER.warning(
+                "Vulcan UONET+: zgodność Period: "
+                "przetłumaczono %s pól StartAt/EndAt",
+                fixed_fields,
+            )
+
+        return [
+            cls.load(student)
+            for student in data
+            if student.get("State") == state.value
+        ]
+
+    compatibility_get._towerbridge_period_compat = True
+    Student.get = classmethod(compatibility_get)
+
+    _LOGGER.warning(
+        "Vulcan UONET+: aktywowano zgodność Period StartAt/EndAt"
+    )
+
+
 def apply_signer_patch() -> None:
     """Podmień signer vulcan-api na uonet-request-signer-hebe."""
 
@@ -92,6 +156,7 @@ def apply_signer_patch() -> None:
 
     try:
         _install_pyopenssl_sign_compatibility()
+        _install_period_fields_compatibility()
 
         import vulcan._api as vulcan_api
         import vulcan._keystore as vulcan_keystore
