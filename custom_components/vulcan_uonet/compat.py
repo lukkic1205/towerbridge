@@ -84,15 +84,39 @@ def _install_pyopenssl_sign_compatibility() -> None:
 
 
 def _legacy_datetime_payload(value: str) -> dict[str, Any]:
-    """Zamień datę YYYY-MM-DD na dawny obiekt DateTime vulcan-api."""
+    """Zamień datę ISO na dawny obiekt DateTime vulcan-api."""
 
-    parsed = datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+    normalized = str(value).strip()
+
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+
+    parsed = datetime.fromisoformat(normalized)
+
+    if parsed.tzinfo is None:
+        timestamp_value = parsed.replace(tzinfo=timezone.utc)
+    else:
+        timestamp_value = parsed.astimezone(timezone.utc)
 
     return {
-        "Timestamp": int(parsed.timestamp() * 1000),
-        "Date": value,
-        "Time": "00:00:00",
+        "Timestamp": int(timestamp_value.timestamp() * 1000),
+        "Date": parsed.date().isoformat(),
+        "Time": parsed.time().replace(
+            tzinfo=None
+        ).isoformat(timespec="seconds"),
     }
+
+
+def _legacy_datetime_value(value: Any) -> Any:
+    """Zachowaj stary słownik daty albo przekonwertuj wartość ISO."""
+
+    if isinstance(value, dict):
+        return value
+
+    if isinstance(value, str) and value.strip():
+        return _legacy_datetime_payload(value)
+
+    return value
 
 
 def _install_period_fields_compatibility() -> None:
@@ -146,6 +170,102 @@ def _install_period_fields_compatibility() -> None:
     )
 
 
+def _install_data_datetime_fields_compatibility() -> None:
+    """Obsłuż nowe pola *At w sprawdzianach, ocenach i zadaniach."""
+
+    from vulcan.data import Exam, Grade, Homework
+
+    mappings = (
+        (
+            Exam,
+            "Exam",
+            {
+                "DateCreated": ("CreatedAt",),
+                "DateModify": ("DateModified", "ModifiedAt"),
+                "Deadline": ("DeadlineAt",),
+            },
+        ),
+        (
+            Grade,
+            "Grade",
+            {
+                "DateCreated": ("CreatedAt",),
+                "DateModify": ("DateModified", "ModifiedAt"),
+            },
+        ),
+        (
+            Homework,
+            "Homework",
+            {
+                "DateCreated": ("CreatedAt",),
+                "Deadline": ("DeadlineAt", "DateAt", "Date"),
+                "AnswerDeadline": ("AnswerDeadlineAt",),
+                "AnswerDate": ("AnswerAt",),
+            },
+        ),
+    )
+
+    for model_cls, label, field_mapping in mappings:
+        current_load = getattr(model_cls, "load")
+        current_func = getattr(
+            current_load,
+            "__func__",
+            current_load,
+        )
+
+        marker = f"_towerbridge_{label.lower()}_datetime_compat"
+
+        if getattr(current_func, marker, False):
+            continue
+
+        def compatibility_load(
+            cls,
+            data,
+            *,
+            _original=current_func,
+            _field_mapping=field_mapping,
+            _label=label,
+        ):
+            fixed_fields = 0
+
+            if isinstance(data, dict):
+                data = dict(data)
+
+                for target, sources in _field_mapping.items():
+                    if data.get(target) is not None:
+                        continue
+
+                    for source in sources:
+                        source_value = data.get(source)
+
+                        if source_value is None:
+                            continue
+
+                        data[target] = _legacy_datetime_value(
+                            source_value
+                        )
+                        fixed_fields += 1
+                        break
+
+            if fixed_fields:
+                _LOGGER.debug(
+                    "Vulcan UONET+: zgodność %s: "
+                    "przetłumaczono %s pól daty",
+                    _label,
+                    fixed_fields,
+                )
+
+            return _original(cls, data)
+
+        setattr(compatibility_load, marker, True)
+        model_cls.load = classmethod(compatibility_load)
+
+    _LOGGER.warning(
+        "Vulcan UONET+: aktywowano zgodność pól daty "
+        "Exam/Grade/Homework"
+    )
+
+
 def apply_signer_patch() -> None:
     """Podmień signer vulcan-api na uonet-request-signer-hebe."""
 
@@ -157,6 +277,7 @@ def apply_signer_patch() -> None:
     try:
         _install_pyopenssl_sign_compatibility()
         _install_period_fields_compatibility()
+        _install_data_datetime_fields_compatibility()
 
         import vulcan._api as vulcan_api
         import vulcan._keystore as vulcan_keystore
