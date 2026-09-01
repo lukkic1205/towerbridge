@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import logging
 from typing import Any
 
@@ -119,6 +119,107 @@ def _legacy_datetime_value(value: Any) -> Any:
     return value
 
 
+def _period_date(period: Any, field: str) -> date | None:
+    """Zwróć datę początku/końca okresu niezależnie od formatu."""
+
+    period_datetime = getattr(period, field, None)
+    value = getattr(period_datetime, "date", None)
+
+    if isinstance(value, date):
+        return value
+
+    if isinstance(value, str) and value.strip():
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+
+    if isinstance(period_datetime, datetime):
+        return period_datetime.date()
+
+    if isinstance(period_datetime, date):
+        return period_datetime
+
+    if isinstance(period_datetime, str) and period_datetime.strip():
+        try:
+            return date.fromisoformat(period_datetime[:10])
+        except ValueError:
+            return None
+
+    return None
+
+
+def _install_current_period_compatibility() -> None:
+    """Wybieraj bieżący okres po datach, gdy pole Current jest nieaktualne."""
+
+    from vulcan.model import Student
+
+    current_property = getattr(Student, "current_period", None)
+    current_getter = getattr(current_property, "fget", None)
+
+    if current_getter is None:
+        return
+
+    if getattr(
+        current_getter,
+        "_towerbridge_current_period_compat",
+        False,
+    ):
+        return
+
+    def compatibility_current_period(self):
+        periods = list(getattr(self, "periods", None) or [])
+        today = date.today()
+
+        # Najpewniejsze kryterium na przełomie roku szkolnego:
+        # rzeczywiste daty Start/End okresu.
+        for period in periods:
+            start = _period_date(period, "start")
+            end = _period_date(period, "end")
+
+            if start and end and start <= today <= end:
+                _LOGGER.debug(
+                    "Vulcan UONET+: wybrano okres %s po datach %s–%s",
+                    getattr(period, "id", None),
+                    start,
+                    end,
+                )
+                return period
+
+        # Jeżeli API poprawnie zaznaczyło Current, zachowujemy stare zachowanie.
+        original = current_getter(self)
+
+        if original is not None:
+            return original
+
+        # Awaryjnie wybierz najnowszy okres, który już się rozpoczął.
+        started_periods = [
+            period
+            for period in periods
+            if (
+                _period_date(period, "start") is not None
+                and _period_date(period, "start") <= today
+            )
+        ]
+
+        if started_periods:
+            return max(
+                started_periods,
+                key=lambda period: (
+                    _period_date(period, "start") or date.min
+                ),
+            )
+
+        return periods[-1] if periods else None
+
+    compatibility_current_period._towerbridge_current_period_compat = True
+    Student.current_period = property(compatibility_current_period)
+
+    _LOGGER.warning(
+        "Vulcan UONET+: aktywowano wybór bieżącego okresu po datach"
+    )
+
+
 def _install_period_fields_compatibility() -> None:
     """Obsłuż nowe pola StartAt/EndAt zwracane przez Vulcan."""
 
@@ -167,6 +268,62 @@ def _install_period_fields_compatibility() -> None:
 
     _LOGGER.warning(
         "Vulcan UONET+: aktywowano zgodność Period StartAt/EndAt"
+    )
+
+
+def _install_lesson_datetime_fields_compatibility() -> None:
+    """Obsłuż nowe formaty/pola daty w rekordach planu lekcji."""
+
+    from vulcan.data import Lesson
+
+    current_load = getattr(Lesson, "load")
+    current_func = getattr(current_load, "__func__", current_load)
+
+    if getattr(
+        current_func,
+        "_towerbridge_lesson_datetime_compat",
+        False,
+    ):
+        return
+
+    def compatibility_load(cls, data):
+        fixed = False
+
+        if isinstance(data, dict):
+            data = dict(data)
+
+            # Vulcan-api oczekuje starego obiektu DateTime w polu Date.
+            # Nowe API może zwrócić ISO bezpośrednio w Date albo DateAt.
+            if data.get("Date") is not None:
+                converted = _legacy_datetime_value(data["Date"])
+
+                if converted is not data["Date"]:
+                    data["Date"] = converted
+                    fixed = True
+            else:
+                for source in ("DateAt", "LessonDateAt", "LessonDate"):
+                    source_value = data.get(source)
+
+                    if source_value is None:
+                        continue
+
+                    data["Date"] = _legacy_datetime_value(source_value)
+                    fixed = True
+                    break
+
+        if fixed:
+            _LOGGER.debug(
+                "Vulcan UONET+: zgodność Lesson: "
+                "znormalizowano pole daty lekcji"
+            )
+
+        return current_func(cls, data)
+
+    compatibility_load._towerbridge_lesson_datetime_compat = True
+    Lesson.load = classmethod(compatibility_load)
+
+    _LOGGER.warning(
+        "Vulcan UONET+: aktywowano zgodność daty planu lekcji"
     )
 
 
@@ -277,6 +434,8 @@ def apply_signer_patch() -> None:
     try:
         _install_pyopenssl_sign_compatibility()
         _install_period_fields_compatibility()
+        _install_current_period_compatibility()
+        _install_lesson_datetime_fields_compatibility()
         _install_data_datetime_fields_compatibility()
 
         import vulcan._api as vulcan_api
