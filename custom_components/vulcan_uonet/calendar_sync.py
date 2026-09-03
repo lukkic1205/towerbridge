@@ -224,10 +224,10 @@ async def async_sync_exam_calendar(
         )
         return
 
-    if not hass.services.has_service("google", "create_event"):
+    if not hass.services.has_service("calendar", "create_event"):
         _LOGGER.warning(
-            "Vulcan: brak akcji google.create_event; "
-            "sprawdź dostęp Google Calendar do zapisu"
+            "Vulcan: brak akcji calendar.create_event; "
+            "sprawdź czy kalendarz ma dostęp do zapisu"
         )
         return
 
@@ -263,8 +263,8 @@ async def async_sync_exam_calendar(
         )
 
         # Wydarzenie wisi od dnia pojawienia się w Vulcanie
-        # do dnia sprawdzianu włącznie. W Google end_date
-        # jest końcem wyłącznym, więc dodajemy jeden dzień.
+        # do dnia sprawdzianu włącznie. end_date jest końcem
+        # wyłącznym, dlatego dodajemy jeden dzień.
         if start_date > deadline:
             start_date = deadline
 
@@ -272,7 +272,7 @@ async def async_sync_exam_calendar(
 
         try:
             await hass.services.async_call(
-                "google",
+                "calendar",
                 "create_event",
                 {
                     "summary": _summary(student, exam),
