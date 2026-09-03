@@ -14,6 +14,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .compat import apply_signer_patch
 from .coordinator import VulcanUonetCoordinator
+from .exam_compat import apply_exam_fetch_patch
 from .frontend import async_register_frontend
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ async def async_setup_entry(
     )
 
     apply_signer_patch()
+    apply_exam_fetch_patch()
 
     # Udostępnienie plików frontendowych integracji.
     await async_register_frontend(hass)
