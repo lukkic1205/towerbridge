@@ -87,8 +87,8 @@ async def _existing_markers(
     """Pobierz znaczniki wydarzeń Vulcan już obecnych w kalendarzu."""
     if not hass.services.has_service("calendar", "get_events"):
         _LOGGER.warning(
-            "Vulcan: brak akcji calendar.get_events; "
-            "pomijam synchronizację sprawdzianów"
+            "Vulcan Calendar: brak akcji calendar.get_events; "
+            "pomijam synchronizację"
         )
         return None
 
@@ -107,9 +107,6 @@ async def _existing_markers(
     today = date.today()
     start = min(dates or [today]) - timedelta(days=30)
     end = max(dates or [today]) + timedelta(days=90)
-
-    # Szeroki zakres pozwala znaleźć wcześniejszy wpis także wtedy,
-    # gdy nauczyciel później zmieni termin sprawdzianu.
     start = min(start, today - timedelta(days=180))
     end = max(end, today + timedelta(days=180))
 
@@ -127,7 +124,7 @@ async def _existing_markers(
         )
     except Exception:
         _LOGGER.exception(
-            "Vulcan: nie udało się odczytać wydarzeń z %s; "
+            "Vulcan Calendar: nie udało się odczytać wydarzeń z %s; "
             "nie tworzę nowych wpisów, żeby uniknąć duplikatów",
             CALENDAR_ENTITY,
         )
@@ -147,6 +144,12 @@ async def _existing_markers(
                 markers.add(line)
             elif line.startswith("VULCAN_EXAM_ID:"):
                 markers.add(line)
+
+    _LOGGER.warning(
+        "Vulcan Calendar: odczytano %s wydarzeń i %s znaczników",
+        len(events),
+        len(markers),
+    )
 
     return markers
 
@@ -211,23 +214,25 @@ async def async_sync_exam_calendar(
     """Dodaj nowe sprawdziany do kalendarza Familijne."""
     exams = _flatten_upcoming_exams(data)
 
+    _LOGGER.warning(
+        "Vulcan Calendar: start synchronizacji; przyszłe sprawdziany=%s",
+        len(exams),
+    )
+
     if not exams:
-        _LOGGER.info(
-            "Vulcan: brak przyszłych sprawdzianów do synchronizacji"
-        )
         return
 
     if hass.states.get(CALENDAR_ENTITY) is None:
         _LOGGER.warning(
-            "Vulcan: kalendarz %s nie jest dostępny",
+            "Vulcan Calendar: kalendarz %s nie jest dostępny",
             CALENDAR_ENTITY,
         )
         return
 
-    if not hass.services.has_service("calendar", "create_event"):
+    if not hass.services.has_service("google", "create_event"):
         _LOGGER.warning(
-            "Vulcan: brak akcji calendar.create_event; "
-            "sprawdź czy kalendarz ma dostęp do zapisu"
+            "Vulcan Calendar: brak akcji google.create_event; "
+            "Google Calendar jest najpewniej skonfigurowany tylko do odczytu"
         )
         return
 
@@ -243,8 +248,7 @@ async def async_sync_exam_calendar(
 
         if marker is None:
             _LOGGER.warning(
-                "Vulcan: sprawdzian bez key/id, "
-                "pomijam synchronizację: %s",
+                "Vulcan Calendar: sprawdzian bez key/id, pomijam: %s",
                 exam,
             )
             continue
@@ -262,9 +266,6 @@ async def async_sync_exam_calendar(
             or date.today()
         )
 
-        # Wydarzenie wisi od dnia pojawienia się w Vulcanie
-        # do dnia sprawdzianu włącznie. end_date jest końcem
-        # wyłącznym, dlatego dodajemy jeden dzień.
         if start_date > deadline:
             start_date = deadline
 
@@ -272,7 +273,7 @@ async def async_sync_exam_calendar(
 
         try:
             await hass.services.async_call(
-                "calendar",
+                "google",
                 "create_event",
                 {
                     "summary": _summary(student, exam),
@@ -289,8 +290,7 @@ async def async_sync_exam_calendar(
             )
         except Exception:
             _LOGGER.exception(
-                "Vulcan: nie udało się dodać sprawdzianu "
-                "do %s: %s",
+                "Vulcan Calendar: nie udało się dodać sprawdzianu do %s: %s",
                 CALENDAR_ENTITY,
                 _summary(student, exam),
             )
@@ -300,16 +300,15 @@ async def async_sync_exam_calendar(
         created_count += 1
 
         _LOGGER.warning(
-            "Vulcan: dodano do %s: %s (%s -> %s)",
+            "Vulcan Calendar: dodano do %s: %s (%s -> %s)",
             CALENDAR_ENTITY,
             _summary(student, exam),
             start_date,
             deadline,
         )
 
-    _LOGGER.info(
-        "Vulcan: synchronizacja kalendarza zakończona; "
-        "nowe=%s, razem=%s",
+    _LOGGER.warning(
+        "Vulcan Calendar: synchronizacja zakończona; nowe=%s, razem=%s",
         created_count,
         len(exams),
     )
