@@ -222,13 +222,8 @@ async def async_sync_exam_calendar(
     if not exams:
         return
 
-    if hass.states.get(CALENDAR_ENTITY) is None:
-        _LOGGER.warning(
-            "Vulcan Calendar: kalendarz %s nie jest dostępny",
-            CALENDAR_ENTITY,
-        )
-        return
-
+    # Nie sprawdzamy hass.states.get(CALENDAR_ENTITY). Encja Google może być
+    # prawidłowym celem akcji mimo braku bieżącego stanu w state machine.
     if not hass.services.has_service("google", "create_event"):
         _LOGGER.warning(
             "Vulcan Calendar: brak akcji google.create_event; "
