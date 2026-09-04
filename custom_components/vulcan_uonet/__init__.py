@@ -12,7 +12,6 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .calendar_sync import async_sync_exam_calendar
 from .compat import apply_signer_patch
 from .coordinator import VulcanUonetCoordinator
 from .exam_compat import apply_exam_fetch_patch
@@ -91,25 +90,6 @@ async def async_setup_entry(
         keystore=keystore,
         client=client,
         coordinator=coordinator,
-    )
-
-    await async_sync_exam_calendar(
-        hass,
-        coordinator.data,
-    )
-
-    def _schedule_calendar_sync() -> None:
-        hass.async_create_task(
-            async_sync_exam_calendar(
-                hass,
-                coordinator.data,
-            )
-        )
-
-    entry.async_on_unload(
-        coordinator.async_add_listener(
-            _schedule_calendar_sync
-        )
     )
 
     await hass.config_entries.async_forward_entry_setups(
