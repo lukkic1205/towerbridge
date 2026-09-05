@@ -41,6 +41,11 @@ async def async_setup_entry(
                     entry,
                     student_id,
                 ),
+                VulcanLessonsWeekSensor(
+                    coordinator,
+                    entry,
+                    student_id,
+                ),
                 VulcanExamsSensor(
                     coordinator,
                     entry,
@@ -280,6 +285,75 @@ class VulcanLessonsTomorrowSensor(VulcanStudentEntity):
         return {
             **self.common_attributes,
             "date": self.tomorrow.isoformat(),
+            "lessons": self.lessons,
+        }
+
+
+class VulcanLessonsWeekSensor(VulcanStudentEntity):
+    """Lekcje z bieżącego lub najbliższego tygodnia szkolnego."""
+
+    def __init__(
+        self,
+        coordinator: VulcanUonetCoordinator,
+        entry: VulcanUonetConfigEntry,
+        student_id: str,
+    ) -> None:
+        """Zainicjuj sensor."""
+
+        super().__init__(
+            coordinator,
+            entry,
+            student_id,
+            "lessons_week",
+            "Lekcje tydzień",
+            "mdi:calendar-week",
+        )
+
+    @property
+    def week_start(self) -> date:
+        """Zwróć poniedziałek bieżącego tygodnia, a w weekend następnego."""
+
+        today = date.today()
+        weekday = today.weekday()
+
+        if weekday <= 4:
+            return today - timedelta(days=weekday)
+
+        return today + timedelta(days=7 - weekday)
+
+    @property
+    def week_end(self) -> date:
+        """Zwróć piątek wybranego tygodnia szkolnego."""
+
+        return self.week_start + timedelta(days=4)
+
+    @property
+    def lessons(self) -> list[dict[str, Any]]:
+        """Zwróć lekcje od poniedziałku do piątku wybranego tygodnia."""
+
+        start = self.week_start.isoformat()
+        end = self.week_end.isoformat()
+
+        return [
+            lesson
+            for lesson in self.student_data.get("lessons", [])
+            if start <= str(lesson.get("date", ""))[:10] <= end
+        ]
+
+    @property
+    def native_value(self) -> int:
+        """Zwróć liczbę lekcji w wybranym tygodniu."""
+
+        return len(self.lessons)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Zwróć plan lekcji na cały tydzień szkolny."""
+
+        return {
+            **self.common_attributes,
+            "week_start": self.week_start.isoformat(),
+            "week_end": self.week_end.isoformat(),
             "lessons": self.lessons,
         }
 
