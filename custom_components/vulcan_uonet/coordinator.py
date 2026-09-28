@@ -121,6 +121,7 @@ def lesson_to_dict(lesson: Any) -> dict[str, Any]:
     room = safe_get(lesson, "room")
     time_slot = safe_get(lesson, "time")
     changes = safe_get(lesson, "changes")
+    change_type = safe_get(changes, "type") if changes is not None else None
     event = safe_get(lesson, "event")
     team_class = safe_get(lesson, "team_class")
 
@@ -148,11 +149,8 @@ def lesson_to_dict(lesson: Any) -> dict[str, Any]:
         "class": safe_get(team_class, "display_name"),
         "visible": safe_get(lesson, "visible", True),
         "changed": changes is not None,
-        "change_type": (
-            str(safe_get(changes, "type"))
-            if changes is not None
-            else None
-        ),
+        "change_type": str(change_type) if change_type is not None else None,
+        "cancelled": str(change_type) == "1",
         "event": str(event) if event else None,
     }
 
